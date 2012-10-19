@@ -84,6 +84,8 @@ Then set up a system cron job to run your application's Cron once a minute:
 The included `run.php` should work for most cases, but you are free to call `Cron::run()`
 in any way you see fit.
 
+## Log activities
+
 In order to use the logs within the module, you'll have to put $_log var to true
 	
 	protected static $_log = true
