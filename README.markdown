@@ -38,6 +38,9 @@ For example,
 	Cron::set('reindex_catalog', array('@daily', 'Catalog::regenerate_index'));
 	Cron::set('calendar_notifications', array('*/5 * * * *', 'Calendar::send_emails'));
 
+Always remember that if you change a frequency value, remove the entry into the cache file
+for that method. If you don't do this, the next call to the method will be with the last cached frequence.
+
 Configured tasks are run with their appropriate frequency by calling `Cron::run()`. Call
 this method in your bootstrap file, and you're done!
 
@@ -80,6 +83,14 @@ Then set up a system cron job to run your application's Cron once a minute:
 
 The included `run.php` should work for most cases, but you are free to call `Cron::run()`
 in any way you see fit.
+
+In order to use the logs within the module, you'll have to put $_log var to true
+	
+	protected static $_log = true
+
+And give an output to your cron job. It should look like this:
+
+	* * * * * /usr/bin/php -f /path/to/kohana/modules/cron/run.php >> log.txt #
 
 
 ## Multi-streaming and using groups
