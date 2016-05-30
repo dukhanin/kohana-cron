@@ -11,97 +11,130 @@ class Kohana_Cron
 {
 	protected static $_jobs = array();
 	protected static $_times = array();
-    protected static $_current_group = 'default';
-    protected static $_force = false;
-    protected static $_current_lock;
-    protected static $_log = true;
-    protected static $_date_logged = false;
+	protected static $_current_group = 'default';
+	protected static $_force = false;
+	protected static $_current_lock;
+	protected static $_log = false;
+	protected static $_date_logged = false;
+	protected $_callback;
+	protected $_period;
+	protected $_group = 'default';
+
+	/**
+	 * Constructor
+	 */
+	public function __construct($period, $callback, $group = null)
+	{
+		$this->_period = $period;
+		$this->_callback = $callback;
+
+		if ($group !== null)
+			$this->_group = $group;
+	}
 
 	/**
 	 * Registers a job to be run
-	 *
-	 * @param   string      Unique name
-	 * @param   array|Cron  Job to run
+	 * @param string      Unique name
+	 * @param array|Cron  Job to run
 	 */
 	public static function set($name, $job, $group = null)
 	{
 		if (is_array($job))
-		{
 			$job = new Cron(reset($job), next($job), $group);
-		}
 
 		Cron::$_jobs[$name] = $job;
 	}
 
-    public static function set_group($group)
+	/**
+	 * Set current cron group
+	 * @param string Cron group
+	 */
+	public static function set_group($group)
 	{
-        if(!is_string($group) && $group !== false)
-            return;
+		if (!is_string($group) && $group !== false)
+			return;
 
 		Cron::$_current_group = $group;
 	}
 
-    public static function set_force($value = true)
-    {
-        self::$_force = !!$value;
-    }
+	/**
+	 * Set force value
+	 * @param boolean value
+	 */
+	public static function set_force($value = true)
+	{
+		self::$_force = !!$value;
+	}
 
-    public static function set_log($value = true)
-    {
-        self::$_log = !!$value;
-    }
+	/**
+	 * Set log value
+	 * @param boolean value
+	 */
+	public static function set_log($value = true)
+	{
+		self::$_log = !!$value;
+	}
 
-    public static function log($str)
-    {
-        if(!self::$_log)
-            return;
+	/**
+	 * Log function. Useful for debugging
+	 * @param string Text to log
+	 */
+	public static function log($str)
+	{
+		if (!self::$_log)
+			return;
 
-        if(!Cron::$_date_logged) {
-            Cron::$_date_logged = true;
-            echo date('Y-m-d') . "\n";
-            return self::log($str);
-        }
+		if (!Cron::$_date_logged)
+		{
+			Cron::$_date_logged = true;
+			echo "\n" . date('Y-m-d') . "\n";
+			return self::log($str);
+		}
 
-        echo date('H:i:s') . ' ' . $str . "\n";
-        @flush();
-        @ob_flush();
-    }
+		echo date('H:i:s') . ' ' . $str . "\n";
+		@flush();
+		@ob_flush();
+	}
 
-    protected static function _get_lock_file()
-    {
-        if(self::$_current_lock === null)
-        {
-            $config = Kohana::$config->load('cron');
-            Cron::$_current_lock = $config->lock;
+	/**
+	 * Get current lock file
+	 * @return string
+	 */
+	protected static function _get_lock_file()
+	{
+		if (self::$_current_lock === null)
+		{
+			$config = Kohana::$config->load('cron');
+			Cron::$_current_lock = $config->lock;
 
-            if(Cron::$_current_group !== null)
-            {
-                $pathinfo = pathinfo(Cron::$_current_lock);
-                $dirname = dirname(Cron::$_current_lock);
-
-                Cron::$_current_lock = $dirname . DIRECTORY_SEPARATOR . $pathinfo['filename'] . '.' . Cron::$_current_group;
-
-                if(!empty($pathinfo['extension']))
-                    Cron::$_current_lock .= '.' . $pathinfo['extension'];
-            }
-        }
-
-        return Cron::$_current_lock;
-
-    }
+			if (Cron::$_current_group !== null)
+			{
+				$pathinfo = pathinfo(Cron::$_current_lock);
+				$dirname = dirname(Cron::$_current_lock);
+				Cron::$_current_lock = $dirname . DIRECTORY_SEPARATOR . $pathinfo['filename'] . '.' . Cron::$_current_group;
+				
+				if (!empty($pathinfo['extension']))
+					Cron::$_current_lock .= '.' . $pathinfo['extension'];
+			}
+		}
+		
+		return Cron::$_current_lock;
+	}
 
 	/**
 	 * Retrieve the timestamps of when jobs should run
 	 */
 	protected static function _load()
 	{
-		Cron::$_times = Kohana::cache("Cron::run()");
+		//Get cached data
+		//9999 sec. of lifetime to return cache each time cause run.php is supposed to be
+		//called each 60 sec. and so Cron::_save() runs every 60 sec which refreshes the cache file)
+		Cron::$_times = Kohana::cache("Cron::run()", NULL, 9999); 
 	}
 
 	/**
 	 * Acquire the Cron mutex
-	 *
-	 * @return  boolean
+	 * @return boolean
 	 */
 	protected static function _lock()
 	{
@@ -142,94 +175,96 @@ class Kohana_Cron
 	 */
 	protected static function _save()
 	{
-		Kohana::cache("Cron::run()", Cron::$_times, Kohana::$config->load('cron')->window * 2);
+		Kohana::cache("Cron::run()", Cron::$_times);
 	}
 
 	/**
 	 * Release the Cron mutex
+	 * @return boolean
 	 */
 	protected static function _unlock()
 	{
+		Cron::log('# Unlocked');
 		return @unlink(Cron::_get_lock_file());
 	}
 
-    protected static function _is_actual(Cron $job)
-    {
-        if(Cron::$_current_group === false)
-            return true;
+	/**
+	 * Tells whether the actual job group is the same as the current group or not
+	 * @return boolean
+	 */
+	protected static function _is_actual(Cron $job)
+	{
+		if (Cron::$_current_group === false)
+			return true;
 
-        return $job->_group == Cron::$_current_group;
-    }
+		return $job->_group == Cron::$_current_group;
+	}
 
 	/**
-	 * @return  boolean FALSE when another instance is running
+	 * Let's make it happens
+	 * @return boolean FALSE when another instance is running
 	 */
 	public static function run()
 	{
-        $config = Kohana::$config->load('cron');
+		$config = Kohana::$config->load('cron');
 
-        Cron::log('# Cron::run() started');
-        Cron::log('# Group: ' . Cron::$_current_group);
-        Cron::log('# Lock file: ' . Cron::_get_lock_file());
-        Cron::log('# Window: ' . $config->window);
-        Cron::log('# Force: ' . (self::$_force ? 'yes' : 'no') );
+		Cron::log('# Cron::run() started');
+		Cron::log('# Lock file: '.Cron::_get_lock_file());
+		Cron::log('# Window: '.$config->window);
 
 		if (empty(Cron::$_jobs))
 			return TRUE;
 
-		if ( ! Cron::_lock()) {
-            Cron::log('# Locked');
-            Cron::log('# Cron::run() halted');
+		if (!Cron::_lock())
+		{
+			Cron::log('# Locked');
+			Cron::log('# Cron::run() halted');
 			return FALSE;
-        }
+		}
 
 		try
 		{
 			Cron::_load();
-
 			$now = time();
 			$threshold = $now - Kohana::$config->load('cron')->window;
 
 			foreach (Cron::$_jobs as $name => $job)
 			{
-                if(!Cron::_is_actual($job))
-                    continue;
+				if (!Cron::_is_actual($job))
+					continue;
 
-                Cron::log('');
-                Cron::log('# Job: ' . $name);
-                Cron::log('# Cron::$_times[' . $name . '] is ' . ( Cron::$_times[$name] ? date('Y-m-d H:i:s', Cron::$_times[$name]) : 'empty'));
-                Cron::log('# $threshold is ' . ( Cron::$_times[$name] ? date('Y-m-d H:i:s', $threshold) : 'empty'));
-                Cron::log('# $job->next($threshold) is ' . date('Y-m-d H:i:s', $job->next($threshold)));
+				Cron::log('# Job: ' . $name);
+				Cron::log('# Cron::$_times['.$name.'] is '. ((isset(Cron::$_times[$name])) ? date('Y-m-d H:i:s', Cron::$_times[$name]) : 'empty'));
+				Cron::log('# $threshold is '.date('Y-m-d H:i:s', $threshold));
+				Cron::log('# $job->next($threshold) is ' . date('Y-m-d H:i:s', $job->next($threshold)));
 
-                if(Cron::$_force)
-                {
-                    Cron::log('# Force start');
-                    $job->execute();
-                }
-                elseif (empty(Cron::$_times[$name]) OR Cron::$_times[$name] < $threshold)
+				if (Cron::$_force)
 				{
-                    Cron::log('# Expired');
-
+					Cron::log('# Force start');
+					$job->execute();
+				}
+				elseif (empty(Cron::$_times[$name]) OR Cron::$_times[$name] < $threshold)
+				{
+					Cron::log('# Expired');
 					Cron::$_times[$name] = $job->next($now);
+					Cron::log('# Cron::$_times['.$name.'] is '.date('Y-m-d H:i:s',Cron::$_times[$name]));
 
 					if ($job->next($threshold) < $now)
 					{
-                        Cron::log('# Started within the window');
+						Cron::log('# Started within the window');
 						$job->execute();
 					}
 				}
 				elseif (Cron::$_times[$name] < $now)
 				{
-                    Cron::log('# Started within the window');
-
+					Cron::log('# Started within the window');
 					Cron::$_times[$name] = $job->next($now);
-
 					$job->execute();
 				}
-                else
-                {
-                    Cron::log('# Skipped');
-                }
+				else
+				{
+					Cron::log('# Skipped');
+				}
 			}
 		}
 		catch (Exception $e) {}
@@ -240,50 +275,38 @@ class Kohana_Cron
 		if (isset($e))
 			throw $e;
 
-        Cron::log('# Cron::run() complited');
+    Cron::log('# Cron::run() completed');
 		return TRUE;
 	}
 
-	protected $_callback;
-	protected $_period;
-    protected $_group = 'default';
-
-	public function __construct($period, $callback, $group = null)
-	{
-		$this->_period = $period;
-		$this->_callback = $callback;
-
-        if($group !== null)
-            $this->_group = $group;
-	}
 
 	/**
 	 * Execute this job
 	 */
 	public function execute()
 	{
-		call_user_func($this->_callback);
+		//call_user_func($this->_callback);
+		Request::factory('cron/execute')
+			->query('cron', $this->_callback)->execute();
 	}
 
 	/**
 	 * Calculates the next timestamp in this period
-	 *
 	 * @param   integer Timestamp from which to calculate
 	 * @return  integer Next timestamp in this period
 	 */
 	public function next($from)
 	{
 		// PHP >= 5.3.0
-		//if ($this->_period instanceof DatePeriod) { return; }
-		//if (is_string($this->_period) AND preg_match('/^P[\dDHMSTWY]+$/', $period)) { $this->_period = new DateInterval($this->_period); }
-		//if ($this->_period instanceof DateInterval) { return; }
+		// if ($this->_period instanceof DatePeriod) { return; }
+		// if (is_string($this->_period) AND preg_match('/^P[\dDHMSTWY]+$/', $period)) { $this->_period = new DateInterval($this->_period); }
+		// if ($this->_period instanceof DateInterval) { return; }
 
 		return $this->_next_crontab($from);
 	}
 
 	/**
 	 * Calculates the next timestamp of this crontab period
-	 *
 	 * @param   integer Timestamp from which to calculate
 	 * @return  integer Next timestamp in this period
 	 */
@@ -408,9 +431,7 @@ class Kohana_Cron
 	/**
 	 * Calculates the first timestamp in the next day of this period when both
 	 * Day of Week and Day of Month are restricted
-	 *
 	 * @uses    _next_crontab_month()
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next restricted Day
 	 */
@@ -480,11 +501,9 @@ class Kohana_Cron
 
 	/**
 	 * Calculates the first timestamp in the next hour of this period
-	 *
 	 * @uses    _next_crontab_day()
 	 * @uses    _next_crontab_monthday()
 	 * @uses    _next_crontab_weekday()
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next Hour
 	 */
@@ -523,9 +542,7 @@ class Kohana_Cron
 
 	/**
 	 * Calculates the timestamp of the next minute in this period
-	 *
 	 * @uses    _next_crontab_hour()
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next Minute
 	 */
@@ -550,7 +567,6 @@ class Kohana_Cron
 
 	/**
 	 * Calculates the first timestamp in the next month of this period
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next Month
 	 */
@@ -613,9 +629,7 @@ class Kohana_Cron
 	/**
 	 * Calculates the first timestamp in the next day of this period when only
 	 * Day of Month is restricted
-	 *
 	 * @uses    _next_crontab_month()
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next Day of Month
 	 */
@@ -641,9 +655,7 @@ class Kohana_Cron
 	/**
 	 * Calculates the first timestamp in the next day of this period when only
 	 * Day of Week is restricted
-	 *
 	 * @uses    _next_crontab_month()
-	 *
 	 * @param   array   Date array from getdate()
 	 * @return  integer Timestamp of next Day of Week
 	 */
@@ -679,7 +691,6 @@ class Kohana_Cron
 	/**
 	 * Returns a sorted array of all the values indicated in a Crontab field
 	 * @link http://linux.die.net/man/5/crontab
-	 *
 	 * @param   string  Crontab field
 	 * @param   integer Minimum value for this field
 	 * @param   integer Maximum value for this field
